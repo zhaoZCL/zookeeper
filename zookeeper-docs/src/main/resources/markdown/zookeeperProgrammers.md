@@ -32,6 +32,7 @@ limitations under the License.
 * [ZooKeeper Sessions](#ch_zkSessions)
 * [ZooKeeper Watches](#ch_zkWatches)
     * [Semantics of Watches](#sc_WatchSemantics)
+    * [Persistent, Recursive Watches](#sc_WatchPersistentRecursive)
     * [Remove Watches](#sc_WatchRemoval)
     * [What ZooKeeper Guarantees about Watches](#sc_WatchGuarantees)
     * [Things to Remember about Watches](#sc_WatchRememberThese)
@@ -50,11 +51,6 @@ limitations under the License.
 * [Building Blocks: A Guide to ZooKeeper Operations](#ch_guideToZkOperations)
     * [Handling Errors](#sc_errorsZk)
     * [Connecting to ZooKeeper](#sc_connectingToZk)
-    * [Read Operations](#sc_readOps)
-    * [Write Operations](#sc_writeOps)
-    * [Handling Watches](#sc_handlingWatches)
-    * [Miscelleaneous ZooKeeper Operations](#sc_miscOps)
-* [Program Structure, with Simple Example](#ch_programStructureWithExample)
 * [Gotchas: Common Problems and Troubleshooting](#ch_gotchas)
 
 <a name="_introduction"></a>
@@ -65,7 +61,7 @@ This document is a guide for developers wishing to create
 distributed applications that take advantage of ZooKeeper's coordination
 services. It contains conceptual and practical information.
 
-The first four sections of this guide present higher level
+The first four sections of this guide present a higher level
 discussions of various ZooKeeper concepts. These are necessary both for an
 understanding of how ZooKeeper works as well how to work with it. It does
 not contain source code, but it does assume a familiarity with the
@@ -82,8 +78,6 @@ information. These are:
 
 * [Building Blocks: A Guide to ZooKeeper Operations](#ch_guideToZkOperations)
 * [Bindings](#ch_bindings)
-* [Program Structure, with Simple Example](#ch_programStructureWithExample)
-  _[tbd]_
 * [Gotchas: Common Problems and Troubleshooting](#ch_gotchas)
 
 The book concludes with an [appendix](#apx_linksToOtherInfo) containing links to other
@@ -92,16 +86,13 @@ useful, ZooKeeper-related information.
 Most of the information in this document is written to be accessible as
 stand-alone reference material. However, before starting your first
 ZooKeeper application, you should probably at least read the chapters on
-the [ZooKeeper Data Model](#ch_zkDataModel) and [ZooKeeper Basic Operations](#ch_guideToZkOperations). Also,
-the [Simple Programmming
-Example](#ch_programStructureWithExample) _[tbd]_ is helpful for understanding the basic
-structure of a ZooKeeper client application.
+the [ZooKeeper Data Model](#ch_zkDataModel) and [ZooKeeper Basic Operations](#ch_guideToZkOperations).
 
 <a name="ch_zkDataModel"></a>
 
 ## The ZooKeeper Data Model
 
-ZooKeeper has a hierarchal name space, much like a distributed file
+ZooKeeper has a hierarchal namespace, much like a distributed file
 system. The only difference is that each node in the namespace can have
 data associated with it as well as children. It is like having a file
 system that allows a file to also be a directory. Paths to nodes are
@@ -136,8 +127,7 @@ For instance, whenever a client retrieves data, it also receives the
 version of the data. And when a client performs an update or a delete,
 it must supply the version of the data of the znode it is changing. If
 the version it supplies doesn't match the actual version of the data,
-the update will fail. (This behavior can be overridden. For more
-information see... )_[tbd...]_
+the update will fail. (This behavior can be overridden.
 
 ######Note
 
@@ -145,12 +135,12 @@ information see... )_[tbd...]_
 _node_ can refer to a generic host machine, a
 server, a member of an ensemble, a client process, etc. In the ZooKeeper
 documentation, _znodes_ refer to the data nodes.
-_Servers_ refer to machines that make up the
+_Servers_ refers to machines that make up the
 ZooKeeper service; _quorum peers_ refer to the
 servers that make up an ensemble; client refers to any host or process
 which uses a ZooKeeper service.
 
-Znodes are the main enitity that a programmer access. They have
+Znodes are the main entity that a programmer access. They have
 several characteristics that are worth mentioning here.
 
 <a name="sc_zkDataMode_watches"></a>
@@ -183,7 +173,7 @@ be much less than that on average. Operating on relatively large data
 sizes will cause some operations to take much more time than others and
 will affect the latencies of some operations because of the extra time
 needed to move more data over the network and onto storage media. If
-large data storage is needed, the usually pattern of dealing with such
+large data storage is needed, the usual pattern of dealing with such
 data is to store it on a bulk storage system, such as NFS or HDFS, and
 store pointers to the storage locations in ZooKeeper.
 
@@ -202,8 +192,8 @@ Retrieves the list of ephemeral nodes created by the session for the
 given path. If the path is empty, it will list all the ephemeral nodes
 for the session.
 **Use Case** - A sample use case might be, if the list of ephemeral
-nodes for the session need to be collected for duplicate data entry check
-and the nodes are created in sequential manner so you do not know the name
+nodes for the session needs to be collected for duplicate data entry check
+and the nodes are created in a sequential manner so you do not know the name
 for duplicate check. In that case, getEphemerals() api could be used to
 get the list of nodes for the session. This might be a typical use case
 for service discovery.
@@ -514,6 +504,88 @@ new list and failing to connect, the client moves back to the normal mode of ope
 an arbitrary server from the connectString and attempts to connect to it. If that fails, it will continue
 trying different random servers in round robin. (see above the algorithm used to initially choose a server)
 
+**Local session**. Added in 3.5.0, mainly implemented by [ZOOKEEPER-1147](https://issues.apache.org/jira/browse/ZOOKEEPER-1147).
+
+- Background: The creation and closing of sessions are costly in ZooKeeper because they need quorum confirmations,
+  they become the bottleneck of a ZooKeeper ensemble when it needs to handle thousands of client connections.
+So after 3.5.0, we introduce a new type of session: local session which doesn't have a full functionality of a normal(global) session, this feature
+will be available by turning on *localSessionsEnabled*.
+
+when *localSessionsUpgradingEnabled* is disable:
+
+- Local sessions cannot create ephemeral nodes
+
+- Once a local session is lost, users cannot re-establish it using the session-id/password, the session and its watches are gone for good.
+  Note: Losing the tcp connection does not necessarily imply that the session is lost. If the connection can be reestablished with the same zk server
+  before the session timeout then the client can continue (it simply cannot move to another server).
+
+- When a local session connects, the session info is only maintained on the zookeeper server that it is connected to. The leader is not aware of the creation of such a session and
+there is no state written to disk.
+
+- The pings, expiration and other session state maintenance are handled by the server which current session is connected to.
+
+when *localSessionsUpgradingEnabled* is enable:
+
+- A local session can be upgraded to the global session automatically.
+
+- When a new session is created it is saved locally in a wrapped *LocalSessionTracker*. It can subsequently be upgraded
+to a global session as required (e.g. create ephemeral nodes). If an upgrade is requested the session is removed from local
+ collections while keeping the same session ID.
+
+- Currently, Only the operation: *create ephemeral node* needs a session upgrade from local to global.
+The reason is that the creation of ephemeral node depends heavily on a global session. If local session can create ephemeral
+node without upgrading to global session, it will cause the data inconsistency between different nodes.
+The leader also needs to know about the lifespan of a session in order to clean up ephemeral nodes on close/expiry.
+This requires a global session as the local session is tied to its particular server.
+
+- A session can be both a local and global session during upgrade, but the operation of upgrade cannot be called concurrently by two thread.
+
+- *ZooKeeperServer*(Standalone) uses *SessionTrackerImpl*; *LeaderZookeeper* uses *LeaderSessionTracker* which holds
+  *SessionTrackerImpl*(global) and *LocalSessionTracker*(if enable); *FollowerZooKeeperServer* and *ObserverZooKeeperServer*
+  use *LearnerSessionTracker* which holds *LocalSessionTracker*.
+    The UML Graph of Classes about session:
+
+    ```
+    +----------------+     +--------------------+       +---------------------+
+    |                | --> |                    | ----> | LocalSessionTracker |
+    | SessionTracker |     | SessionTrackerImpl |       +---------------------+
+    |                |     |                    |                              +-----------------------+
+    |                |     |                    |  +-------------------------> | LeaderSessionTracker  |
+    +----------------+     +--------------------+  |                           +-----------------------+
+               |                                   |
+               |                                   |
+               |                                   |
+               |           +---------------------------+
+               +---------> |                           |
+                           | UpgradeableSessionTracker |
+                           |                           |
+                           |                           | ------------------------+
+                           +---------------------------+                         |
+                                                                                 |
+                                                                                 |
+                                                                                 v
+                                                                               +-----------------------+
+                                                                               | LearnerSessionTracker |
+                                                                               +-----------------------+
+    ```
+
+- Q&A
+ - *What's the reason for having the config option to disable local session upgrade?*
+     - In a large deployment which wants to handle a very large number of clients, we know that clients connecting via the observers
+    which is supposed to be local session only. So this is more like a safeguard against someone accidentally creates lots of ephemeral nodes and global sessions.
+
+ - *When is the session created?*
+     - In the current implementation, it will try to create a local session when processing *ConnectRequest* and when
+     *createSession* request reaches *FinalRequestProcessor*.
+
+ - *What happens if the create for session is sent at server A and the client disconnects to some other server B
+    which ends up sending it again and then disconnects and connects back to server A?*
+     - When a client reconnects to B, its sessionId won’t exist in B’s local session tracker. So B will send validation packet.
+     If CreateSession issued by A is committed before validation packet arrive the client will be able to connect.
+     Otherwise, the client will get session expired because the quorum hasn’t know about this session yet.
+     If the client also tries to connect back to A again, the session is already removed from local session tracker.
+     So A will need to send a validation packet to the leader. The outcome should be the same as B depending on the timing of the request.
+
 <a name="ch_zkWatches"></a>
 
 ## ZooKeeper Watches
@@ -569,6 +641,11 @@ general this all occurs transparently. There is one case where a watch
 may be missed: a watch for the existence of a znode not yet created will
 be missed if the znode is created and deleted while disconnected.
 
+**New in 3.6.0:** Clients can also set
+permanent, recursive watches on a znode that are not removed when triggered
+and that trigger for changes on the registered znode as well as any children
+znodes recursively.
+       
 <a name="sc_WatchSemantics"></a>
 
 ### Semantics of Watches
@@ -586,6 +663,21 @@ the events that a watch can trigger and the calls that enable them:
 * **Child event:**
   Enabled with a call to getChildren.
 
+<a name="sc_WatchPersistentRecursive"></a>
+
+### Persistent, Recursive Watches
+
+**New in 3.6.0:** There is now a variation on the standard
+watch described above whereby you can set a watch that does not get removed when triggered.
+Additionally, these watches trigger the event types *NodeCreated*, *NodeDeleted*, and *NodeDataChanged* 
+and, optionally, recursively for all znodes starting at the znode that the watch is registered for. Note 
+that *NodeChildrenChanged* events are not triggered for persistent recursive watches as it would be redundant.
+
+Persistent watches are set using the method *addWatch()*. The triggering semantics and guarantees
+(other than one-time triggering) are the same as standard watches. The only exception regarding events is that
+recursive persistent watchers never trigger child changed events as they are redundant.
+Persistent watches are removed using *removeWatches()* with watcher type *WatcherType.Any*.
+       
 <a name="sc_WatchRemoval"></a>
 
 ### Remove Watches
@@ -600,6 +692,8 @@ successful watch removal.
   Watcher which was added with a call to getChildren.
 * **Data Remove event:**
   Watcher which was added with a call to exists or getData.
+* **Persistent Remove event:**
+  Watcher which was added with a call to add a persistent watch.
 
 <a name="sc_WatchGuarantees"></a>
 
@@ -622,11 +716,11 @@ guarantees:
 
 ### Things to Remember about Watches
 
-* Watches are one time triggers; if you get a watch event and
+* Standard watches are one time triggers; if you get a watch event and
   you want to get notified of future changes, you must set another
   watch.
 
-* Because watches are one time triggers and there is latency
+* Because standard watches are one time triggers and there is latency
   between getting the event and sending a new request to get a watch
   you cannot reliably see every change that happens to a node in
   ZooKeeper. Be prepared to handle the case where the znode changes
@@ -987,7 +1081,7 @@ the _isValid(String id)_ method. It is up to the plugin to verify
 that the id has a correct form. For example, _ip:172.16.0.0/16_
 is a valid id, but _ip:host.com_ is not. If the new ACL includes
 an "auth" entry, _isAuthenticated_ is used to see if the
-authentication information for this scheme that is assocatied with the connection
+authentication information for this scheme that is associated with the connection
 should be added to the ACL. Some schemes
 should not be included in auth. For example, the IP address of the client is not
 considered as an id that should be added to the ACL if auth is specified.
@@ -1065,7 +1159,9 @@ guarantees:
 
 * *Single System Image* :
     A client will see the same view of the service regardless of
-    the server that it connects to.
+    the server that it connects to. i.e., a client will never see an
+    older view of the system even if the client fails over to a
+    different server with the same session.
 
 * *Reliability* :
     Once an update has been applied, it will persist from that
@@ -1107,14 +1203,13 @@ ZooKeeper does _not_ in fact make. This is:
     to read /a, client B may read the old value of 0, depending on
     which server it is connected to. If it
     is important that Client A and Client B read the same value,
-    Client B should should call the **sync()** method from the ZooKeeper API
+    Client B should call the **sync()** method from the ZooKeeper API
     method before it performs its read.
     So, ZooKeeper by itself doesn't guarantee that changes occur
     synchronously across all servers, but ZooKeeper
     primitives can be used to construct higher level functions that
     provide useful client synchronization. (For more information,
     see the [ZooKeeper Recipes](recipes.html).
-    _[tbd:..]_).
 
 <a name="ch_bindings"></a>
 
@@ -1135,7 +1230,7 @@ generated classes that are used simply as containers.
 
 The main class used by a ZooKeeper Java client is the **ZooKeeper** class. Its two constructors differ only
 by an optional session id and password. ZooKeeper supports session
-recovery accross instances of a process. A Java program may save its
+recovery across instances of a process. A Java program may save its
 session id and password to stable storage, restart, and recover the
 session that was used by the earlier instance of the program.
 
@@ -1164,8 +1259,8 @@ design:
   Note that if there is a change to **/a** between the asynchronous read and the
   synchronous read, the client library will receive the watch event
   saying **/a** changed before the
-  response for the synchronous read, but because the completion
-  callback is blocking the event queue, the synchronous read will
+  response for the synchronous read, but because of the completion
+  callback blocking the event queue, the synchronous read will
   return with the new value of **/a**
   before the watch event is processed.
 
@@ -1181,8 +1276,11 @@ handle is undefined behavior and should be avoided.
 
 The following list contains configuration properties for the Java client. You can set any
 of these properties using Java system properties. For server properties, please check the
-following reference
-[Server configuration section.](zookeeperAdmin.html#sc_configuration)
+[Server configuration section of the Admin Guide](zookeeperAdmin.html#sc_configuration).
+The ZooKeeper Wiki also has useful pages about
+[ZooKeeper SSL support](https://cwiki.apache.org/confluence/display/ZOOKEEPER/ZooKeeper+SSL+User+Guide), 
+and [SASL authentication for ZooKeeper](https://cwiki.apache.org/confluence/display/ZOOKEEPER/ZooKeeper+and+SASL).
+
 
 * *zookeeper.sasl.client* :
     Set the value to **false** to disable
@@ -1191,6 +1289,13 @@ following reference
 * *zookeeper.sasl.clientconfig* :
     Specifies the context key in the JAAS login file. Default is "Client".
 
+* *zookeeper.server.principal* :
+    Specifies the server principal to be used by the client for authentication, while connecting to the zookeeper
+    server, when Kerberos authentication is enabled. If this configuration is provided, then 
+    the ZooKeeper client will NOT USE any of the following parameters to determine the server principal: 
+    zookeeper.sasl.client.username, zookeeper.sasl.client.canonicalize.hostname, zookeeper.server.realm
+    Note: this config parameter is working only for ZooKeeper 3.5.7+, 3.6.0+
+
 * *zookeeper.sasl.client.username* :
     Traditionally, a principal is divided into three parts: the primary, the instance, and the realm.
     The format of a typical Kerberos V5 principal is primary/instance@REALM.
@@ -1198,6 +1303,13 @@ following reference
     is "zookeeper". Instance part is derived from the server IP. Finally server's principal is
     username/IP@realm, where username is the value of zookeeper.sasl.client.username, IP is
     the server IP, and realm is the value of zookeeper.server.realm.
+
+* *zookeeper.sasl.client.canonicalize.hostname* :
+    Expecting the zookeeper.server.principal parameter is not provided, the ZooKeeper client will try to
+    determine the 'instance' (host) part of the ZooKeeper server principal. First it takes the hostname provided 
+    as the ZooKeeper server connection string. Then it tries to 'canonicalize' the address by getting
+    the fully qualified domain name belonging to the address. You can disable this 'canonicalization'
+    by setting: zookeeper.sasl.client.canonicalize.hostname=false
 
 * *zookeeper.server.realm* :
     Realm part of the server principal. By default it is the client principal realm.
@@ -1233,10 +1345,11 @@ following reference
     and the password to unlock the file.
 
 * *jute.maxbuffer* :
-    It specifies the maximum size of the incoming data from the server. The default value is 4194304
-    Bytes , or just 4 MB. This is really a sanity check. The ZooKeeper server is designed to store and send
+    In the client side, it specifies the maximum size of the incoming data from the server. The default is 0xfffff(1048575) bytes,
+    or just under 1M. This is really a sanity check. The ZooKeeper server is designed to store and send
     data on the order of kilobytes. If incoming data length is more than this value, an IOException
-    is raised.
+    is raised. This value of client side should keep same with the server side(Setting **System.setProperty("jute.maxbuffer", "xxxx")** in the client side will work),
+    otherwise problems will arise.
 
 * *zookeeper.kinit* :
     Specifies path to kinit binary. Default is "/usr/bin/kinit".
@@ -1315,7 +1428,7 @@ you have to remember to
 1. Include ZooKeeper header: `#include <zookeeper/zookeeper.h>`
 1. If you are building a multithreaded client, compile with
   `-DTHREADED` compiler flag to enable the multi-threaded version of
-  the library, and then link against against the
+  the library, and then link against the
   _zookeeper_mt_ library. If you are building a
   single-threaded client, do not compile with `-DTHREADED`, and be
   sure to link against the_zookeeper_st_library.
@@ -1431,28 +1544,6 @@ Run the client.
 
 From the output, you should see "Connected to Zookeeper" along with Zookeeper's DEBUG messages if the connection is successful.
 
-<a name="sc_readOps"></a>
-
-### Read Operations
-
-<a name="sc_writeOps"></a>
-
-### Write Operations
-
-<a name="sc_handlingWatches"></a>
-
-### Handling Watches
-
-<a name="sc_miscOps"></a>
-
-### Miscelleaneous ZooKeeper Operations
-
-<a name="ch_programStructureWithExample"></a>
-
-## Program Structure, with Simple Example
-
-_[tbd]_
-
 <a name="ch_gotchas"></a>
 
 ## Gotchas: Common Problems and Troubleshooting
@@ -1509,14 +1600,10 @@ ZooKeeper users fall into:
 Outside the formal documentation, there're several other sources of
 information for ZooKeeper developers.
 
-* *ZooKeeper Whitepaper _[tbd: find url]_* :
-    The definitive discussion of ZooKeeper design and performance,
-    by Yahoo! Research
-
-* *[API Reference](https://zookeeper.apache.org/doc/current/api/index.html)* :
+* *[API Reference](https://zookeeper.apache.org/doc/current/apidocs/zookeeper-server/index.html)* :
     The complete reference to the ZooKeeper API
 
-* *[ZooKeeper Talk at the Hadoup Summit 2008](http://us.dl1.yimg.com/download.yahoo.com/dl/ydn/zookeeper.m4v)* :
+* *[ZooKeeper Talk at the Hadoop Summit 2008](https://www.youtube.com/watch?v=rXI9xiesUV8)* :
     A video introduction to ZooKeeper, by Benjamin Reed of Yahoo!
     Research
 
@@ -1531,7 +1618,4 @@ information for ZooKeeper developers.
     Pseudo-level discussion of the implementation of various
     synchronization solutions with ZooKeeper: Event Handles, Queues,
     Locks, and Two-phase Commits.
-
-* *_[tbd]_* :
-    Any other good sources anyone can think of...
 

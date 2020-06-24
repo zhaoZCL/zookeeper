@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -22,7 +22,6 @@ import java.io.File;
 import java.net.InetSocketAddress;
 import java.util.Arrays;
 import java.util.Properties;
-
 import org.apache.yetus.audience.InterfaceAudience;
 import org.apache.zookeeper.metrics.impl.DefaultMetricsProvider;
 import org.apache.zookeeper.server.quorum.QuorumPeerConfig;
@@ -36,6 +35,7 @@ import org.apache.zookeeper.server.quorum.QuorumPeerConfig.ConfigException;
  */
 @InterfaceAudience.Public
 public class ServerConfig {
+
     ////
     //// If you update the configuration parameters be sure
     //// to update the "conf" 4letter word
@@ -54,6 +54,7 @@ public class ServerConfig {
     protected Properties metricsProviderConfiguration = new Properties();
     /** defaults to -1 if not set explicitly */
     protected int listenBacklog = -1;
+    protected String initialConfig;
 
     /** JVM Pause Monitor feature switch */
     protected boolean jvmPauseMonitorToRun = false;
@@ -67,7 +68,6 @@ public class ServerConfig {
     /**
      * Parse arguments for server configuration
      * @param args clientPort dataDir and optional tickTime and maxClientCnxns
-     * @return ServerConfig configured wrt arguments
      * @throws IllegalArgumentException on invalid usage
      */
     public void parse(String[] args) {
@@ -89,7 +89,6 @@ public class ServerConfig {
     /**
      * Parse a ZooKeeper configuration file
      * @param path the patch of the configuration file
-     * @return ServerConfig configured wrt arguments
      * @throws ConfigException error processing configuration
      */
     public void parse(String path) throws ConfigException {
@@ -121,6 +120,7 @@ public class ServerConfig {
         metricsProviderClassName = config.getMetricsProviderClassName();
         metricsProviderConfiguration = config.getMetricsProviderConfiguration();
         listenBacklog = config.getClientPortListenBacklog();
+        initialConfig = config.getInitialConfig();
     }
 
     public InetSocketAddress getClientPortAddress() {
@@ -129,14 +129,26 @@ public class ServerConfig {
     public InetSocketAddress getSecureClientPortAddress() {
         return secureClientPortAddress;
     }
-    public File getDataDir() { return dataDir; }
-    public File getDataLogDir() { return dataLogDir; }
-    public int getTickTime() { return tickTime; }
-    public int getMaxClientCnxns() { return maxClientCnxns; }
+    public File getDataDir() {
+        return dataDir;
+    }
+    public File getDataLogDir() {
+        return dataLogDir;
+    }
+    public int getTickTime() {
+        return tickTime;
+    }
+    public int getMaxClientCnxns() {
+        return maxClientCnxns;
+    }
     /** minimum session timeout in milliseconds, -1 if unset */
-    public int getMinSessionTimeout() { return minSessionTimeout; }
+    public int getMinSessionTimeout() {
+        return minSessionTimeout;
+    }
     /** maximum session timeout in milliseconds, -1 if unset */
-    public int getMaxSessionTimeout() { return maxSessionTimeout; }
+    public int getMaxSessionTimeout() {
+        return maxSessionTimeout;
+    }
 
     public long getJvmPauseInfoThresholdMs() {
         return jvmPauseInfoThresholdMs;
@@ -150,8 +162,15 @@ public class ServerConfig {
     public boolean isJvmPauseMonitorToRun() {
         return jvmPauseMonitorToRun;
     }
-    public String getMetricsProviderClassName() { return metricsProviderClassName; }
-    public Properties getMetricsProviderConfiguration() { return metricsProviderConfiguration; }
+    public String getMetricsProviderClassName() {
+        return metricsProviderClassName;
+    }
+    public Properties getMetricsProviderConfiguration() {
+        return metricsProviderConfiguration;
+    }
     /** Maximum number of pending socket connections to read, -1 if unset */
-    public int getClientPortListenBacklog() { return listenBacklog; }
+    public int getClientPortListenBacklog() {
+        return listenBacklog;
+    }
+
 }

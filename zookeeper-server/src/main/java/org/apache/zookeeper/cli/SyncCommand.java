@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements. See the NOTICE file distributed with this
  * work for additional information regarding copyright ownership. The ASF
@@ -14,14 +14,18 @@
  * License for the specific language governing permissions and limitations under
  * the License.
  */
+
 package org.apache.zookeeper.cli;
 
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
 import org.apache.commons.cli.Parser;
 import org.apache.commons.cli.PosixParser;
-import org.apache.zookeeper.AsyncCallback;
 
 /**
  * sync command for cli
@@ -30,6 +34,7 @@ public class SyncCommand extends CliCommand {
 
     private static Options options = new Options();
     private String[] args;
+    public static final long SYNC_TIMEOUT = TimeUnit.SECONDS.toMillis(30L);
 
     public SyncCommand() {
         super("sync", "path");
@@ -55,18 +60,27 @@ public class SyncCommand extends CliCommand {
     @Override
     public boolean exec() throws CliException {
         String path = args[1];
-        try {
-            zk.sync(path, new AsyncCallback.VoidCallback() {
+        CompletableFuture<Integer> cf = new CompletableFuture<>();
 
-                public void processResult(int rc, String path, Object ctx) {
-                    out.println("Sync returned " + rc);
-                }
-            }, null);
+        try {
+            zk.sync(path, (rc, path1, ctx) -> cf.complete(rc), null);
+
+            int resultCode = cf.get(SYNC_TIMEOUT, TimeUnit.MILLISECONDS);
+            if (resultCode == 0) {
+                out.println("Sync is OK");
+            } else {
+                out.println("Sync has failed. rc=" + resultCode);
+            }
         } catch (IllegalArgumentException ex) {
             throw new MalformedPathException(ex.getMessage());
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            throw new CliWrapperException(ie);
+        } catch (TimeoutException | ExecutionException ex) {
+            throw new CliWrapperException(ex);
         }
-
 
         return false;
     }
+
 }

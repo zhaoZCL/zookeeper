@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -15,6 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.zookeeper.metrics.impl;
 
 import java.util.Properties;
@@ -77,8 +78,11 @@ public class NullMetricsProvider implements MetricsProvider {
         }
 
         @Override
-        public boolean registerGauge(String name, Gauge gauge) {
-            return true;
+        public void registerGauge(String name, Gauge gauge) {
+        }
+
+        @Override
+        public void unregisterGauge(String name) {
         }
 
         @Override
@@ -127,4 +131,5 @@ public class NullMetricsProvider implements MetricsProvider {
         }
 
     }
+
 }

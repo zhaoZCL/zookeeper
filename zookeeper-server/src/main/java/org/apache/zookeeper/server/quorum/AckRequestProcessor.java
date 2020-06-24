@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -18,18 +18,18 @@
 
 package org.apache.zookeeper.server.quorum;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import org.apache.zookeeper.server.Request;
 import org.apache.zookeeper.server.RequestProcessor;
-
+import org.apache.zookeeper.server.ServerMetrics;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * This is a very simple RequestProcessor that simply forwards a request from a
  * previous stage to the leader as an ACK.
  */
 class AckRequestProcessor implements RequestProcessor {
+
     private static final Logger LOG = LoggerFactory.getLogger(AckRequestProcessor.class);
     Leader leader;
 
@@ -42,13 +42,16 @@ class AckRequestProcessor implements RequestProcessor {
      */
     public void processRequest(Request request) {
         QuorumPeer self = leader.self;
-        if(self != null)
+        if (self != null) {
+            request.logLatency(ServerMetrics.getMetrics().PROPOSAL_ACK_CREATION_LATENCY);
             leader.processAck(self.getId(), request.zxid, null);
-        else
+        } else {
             LOG.error("Null QuorumPeer");
+        }
     }
 
     public void shutdown() {
-        // XXX No need to do anything
+        // TODO No need to do anything
     }
+
 }
